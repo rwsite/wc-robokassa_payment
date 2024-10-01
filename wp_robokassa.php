@@ -238,7 +238,7 @@ function robokassa_payment_wp_robokassa_checkPayment()
 
         /** @var string $returner */
         $returner = '';
-
+        $_REQUEST['InvId'] = $_REQUEST['InvId'] ?? 0;
         if ($_REQUEST['robokassa'] === 'result') {
 
             /** @var string $crc_confirm */
