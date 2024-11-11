@@ -37,8 +37,6 @@ add_action('wp_enqueue_scripts', function () {
     );
 });
 
-define('ROBOKASSA_PAYMENT_DEBUG_STATUS', false);
-
 spl_autoload_register(
     function ($className) {
         $file = __DIR__ . '/classes/' . str_replace('\\', '/', $className) . '.php';
@@ -100,6 +98,7 @@ add_action('woocommerce_order_status_changed', 'robokassa_hold_confirm', 10, 4);
 add_action('woocommerce_order_status_changed', 'robokassa_hold_cancel', 10, 4);
 add_action('robokassa_cancel_payment_event', 'robokassa_hold_cancel_after5', 10, 1);
 
+
 register_activation_hook(__FILE__, 'robokassa_payment_wp_robokassa_activate'); //Хук при активации плагина. Дефолтовые настройки и таблица в БД для СМС.
 
 add_filter('woocommerce_get_privacy_policy_text', 'robokassa_get_privacy_policy_text', 10, 2);
@@ -124,10 +123,8 @@ function robokassa_get_privacy_policy_text($text, $type)
  */
 function robokassa_payment_DEBUG($str)
 {
-
     /** @var string $file */
     $file = __DIR__ . '/data/robokassa_DEBUG.txt';
-
     $time = time();
     $DEBUGFile = fopen($file, 'a+');
     fwrite($DEBUGFile, date('d.m.Y H:i:s', $time + 10800) . " ($time) : $str\r\n");
@@ -242,7 +239,7 @@ function robokassa_payment_wp_robokassa_checkPayment()
 
         /** @var string $returner */
         $returner = '';
-
+        $_REQUEST['InvId'] = $_REQUEST['InvId'] ?? 0;
         if ($_REQUEST['robokassa'] === 'result') {
 
             /** @var string $crc_confirm */
@@ -418,34 +415,34 @@ function getRobokassaPasses()
  */
 function createRobokassaReceipt($order_id)
 {
-    global $woocommerce;
+
     $order = new WC_Order($order_id);
 
     $sno = get_option('robokassa_payment_sno');
     if ($sno != 'fckoff' && get_option('robokassa_country_code') == 'RU') {
         $receipt['sno'] = $sno;
     }
-    $receipt['sno'] = $sno;
 
     $tax = get_option('robokassa_payment_tax');
     if ($tax == "vat118") $tax = "vat120";
 
-    $cart = $woocommerce->cart->get_cart();
+    $cart = WC()->cart;
+    $cart->calculate_totals();
 
     $receipt = array();
 
-    $total_order = $order->get_total();
-    $total_receipt = 0;
+    $total_order = $order->get_total(); // Сумма OutSum
+    $total_receipt = 0; // Сумма всех $current['sum']
 
-    foreach ($cart as $item) {
+    foreach ($cart->get_cart_contents() as $item) {
         $product = wc_get_product($item['product_id']);
+        $quantity = (float)$item['quantity'];
 
         $current = [];
         $current['name'] = $product->get_title();
-        $current['quantity'] = $item['quantity'];
-        $current['sum'] = $item['line_total'];
-        $current['cost'] = $item['line_total'] / $item['quantity'];
-
+        $current['quantity'] = $quantity;
+        $current['cost'] = $item['data']->get_price();
+        $current['sum'] = $item['data']->get_price() * $quantity;
         $total_receipt += $current['sum'];
 
         if (get_option('robokassa_country_code') == 'RU') {
@@ -492,8 +489,8 @@ function createRobokassaReceipt($order_id)
 
             $current['name'] = $product->get_title();
             $current['quantity'] = $item->get_quantity();
-            $current['sum'] = $item['line_total'];
-            $current['cost'] = $item['line_total'] / $item->get_quantity();;
+            $current['cost'] = $item['data']->get_price();
+            $current['sum'] = $item['data']->get_price() * $item->get_quantity();
 
             $current['payment_object'] = get_option('robokassa_payment_paymentObject');
             $current['payment_method'] = get_option('robokassa_payment_paymentMethod');
@@ -521,7 +518,7 @@ function createRobokassaReceipt($order_id)
             $current['payment_method'] = get_option('robokassa_payment_paymentMethod');
         }
 
-        if (isset($receipt['sno']) && ($receipt['sno'] == 'osn') || (get_option('robokassa_country_code') != 'KZ')) {
+        if (isset($receipt['sno']) && ($receipt['sno'] == 'osn') || (get_option('robokassa_country_code') == 'KZ')) {
             $current['tax'] = $tax;
         } else {
             $current['tax'] = 'none';
@@ -735,6 +732,7 @@ function robokassa_2check_send($order_id, $old_status, $new_status)
             return;
         }
 
+
         /** @var array $fields */
         $fields = [
             'merchantId' => get_option('robokassa_payment_MerchantLogin'),
@@ -742,7 +740,7 @@ function robokassa_2check_send($order_id, $old_status, $new_status)
             'originId' => $order->get_id(),
             'operation' => 'sell',
             'sno' => $sno,
-            'url' => urlencode('http://' . $_SERVER['HTTP_HOST']),
+            'url' => urlencode('http://' .$_SERVER['HTTP_HOST']),
             'total' => $order->get_total(),
             'items' => [],
             'client' => [
@@ -776,8 +774,6 @@ function robokassa_2check_send($order_id, $old_status, $new_status)
 
             switch ($tax) {
                 case "vat0":
-                    $fields['vats'][] = ['type' => $tax, 'sum' => 0];
-                    break;
                 case "none":
                     $fields['vats'][] = ['type' => $tax, 'sum' => 0];
                     break;
@@ -814,10 +810,8 @@ function robokassa_2check_send($order_id, $old_status, $new_status)
                 $fields['items'][] = $products_items;
 
                 switch ($tax) {
-                    case "vat0":
-                        $fields['vats'][] = ['type' => $tax, 'sum' => 0];
-                        break;
                     case "none":
+                    case "vat0":
                         $fields['vats'][] = ['type' => $tax, 'sum' => 0];
                         break;
                     case "vat10":
