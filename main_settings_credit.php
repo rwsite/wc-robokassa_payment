@@ -45,7 +45,7 @@
 
 
         function searchAlias($data, &$show_podeli, &$show_credit) {
-            foreach ($data as $key => $value) {
+            foreach ($data ?? [] as $key => $value) {
                 if ($key === 'Alias') {
                     if ($value === 'Podeli') {
                         $show_podeli = true;
